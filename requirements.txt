@@ -1,0 +1,9 @@
+Flask
+flask-cors
+face-recognition
+opencv-python
+numpy
+firebase-admin
+Pillow
+dlib
+cmake
