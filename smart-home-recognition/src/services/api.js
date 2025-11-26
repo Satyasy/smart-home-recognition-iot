@@ -1,165 +1,150 @@
 // API Service untuk komunikasi dengan Flask Backend
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 class ApiService {
-  // Health Check
-  static async healthCheck() {
+  // Helper untuk fetch dengan error handling
+  async fetchWithError(url, options = {}) {
     try {
-      const response = await fetch(`${API_BASE_URL}/health`);
-      return await response.json();
-    } catch (error) {
-      console.error('Health check failed:', error);
-      throw error;
-    }
-  }
-
-  // Register Face
-  static async registerFace(imageBase64, name, email = '', phone = '') {
-    try {
-      const response = await fetch(`${API_BASE_URL}/register`, {
-        method: 'POST',
+      const response = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
+          ...options.headers,
         },
-        body: JSON.stringify({
-          image: imageBase64,
-          name,
-          email,
-          phone
-        })
+        ...options,
       });
-      return await response.json();
+
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.message || 'API request failed');
+      }
+
+      return data;
     } catch (error) {
-      console.error('Register face failed:', error);
+      console.error('API Error:', error);
       throw error;
     }
   }
 
-  // Recognize Face
-  static async recognizeFace(imageBase64) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/recognize`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: imageBase64
-        })
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Recognize face failed:', error);
-      throw error;
-    }
+  // Register new user dengan face image
+  async registerUser(imageBase64, name, email, phone = '') {
+    return this.fetchWithError(`${API_BASE_URL}/register`, {
+      method: 'POST',
+      body: JSON.stringify({
+        image: imageBase64,
+        name,
+        email,
+        phone
+      }),
+    });
   }
 
-  // Get All Users
-  static async getUsers() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/users`);
-      return await response.json();
-    } catch (error) {
-      console.error('Get users failed:', error);
-      throw error;
-    }
+  // Recognize face dari ESP32-CAM
+  async recognizeFace(imageBase64) {
+    return this.fetchWithError(`${API_BASE_URL}/recognize`, {
+      method: 'POST',
+      body: JSON.stringify({
+        image: imageBase64
+      }),
+    });
   }
 
-  // Get User by ID
-  static async getUser(userId) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/user/${userId}`);
-      return await response.json();
-    } catch (error) {
-      console.error('Get user failed:', error);
-      throw error;
-    }
+  // Verify two faces
+  async verifyFaces(image1Base64, image2Base64) {
+    return this.fetchWithError(`${API_BASE_URL}/verify`, {
+      method: 'POST',
+      body: JSON.stringify({
+        image1: image1Base64,
+        image2: image2Base64
+      }),
+    });
   }
 
-  // Update User
-  static async updateUser(userId, data) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/user/${userId}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data)
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Update user failed:', error);
-      throw error;
-    }
+  // Get all registered users
+  async getUsers() {
+    return this.fetchWithError(`${API_BASE_URL}/users`, {
+      method: 'GET',
+    });
   }
 
-  // Delete User
-  static async deleteUser(userId) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/user/${userId}`, {
-        method: 'DELETE'
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Delete user failed:', error);
-      throw error;
-    }
+  // Get specific user
+  async getUser(userId) {
+    return this.fetchWithError(`${API_BASE_URL}/user/${userId}`, {
+      method: 'GET',
+    });
   }
 
-  // Get Access Logs
-  static async getLogs(limit = 50) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/logs?limit=${limit}`);
-      return await response.json();
-    } catch (error) {
-      console.error('Get logs failed:', error);
-      throw error;
-    }
+  // Update user
+  async updateUser(userId, data) {
+    return this.fetchWithError(`${API_BASE_URL}/user/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
   }
 
-  // Clear Logs
-  static async clearLogs() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/logs/clear`, {
-        method: 'DELETE'
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Clear logs failed:', error);
-      throw error;
-    }
+  // Delete user
+  async deleteUser(userId) {
+    return this.fetchWithError(`${API_BASE_URL}/user/${userId}`, {
+      method: 'DELETE',
+    });
   }
 
-  // Get Config
-  static async getConfig() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/config`);
-      return await response.json();
-    } catch (error) {
-      console.error('Get config failed:', error);
-      throw error;
-    }
+  // Get access logs
+  async getAccessLogs(limit = 50) {
+    return this.fetchWithError(`${API_BASE_URL}/logs?limit=${limit}`, {
+      method: 'GET',
+    });
   }
 
-  // Verify Two Faces
-  static async verifyFaces(image1Base64, image2Base64) {
-    try {
-      const response = await fetch(`${API_BASE_URL}/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image1: image1Base64,
-          image2: image2Base64
-        })
-      });
-      return await response.json();
-    } catch (error) {
-      console.error('Verify faces failed:', error);
-      throw error;
-    }
+  // Clear all logs
+  async clearLogs() {
+    return this.fetchWithError(`${API_BASE_URL}/logs/clear`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Get system configuration
+  async getConfig() {
+    return this.fetchWithError(`${API_BASE_URL}/config`, {
+      method: 'GET',
+    });
+  }
+
+  // Health check
+  async healthCheck() {
+    return this.fetchWithError(`${API_BASE_URL}/health`, {
+      method: 'GET',
+    });
+  }
+
+  // Verify PIN
+  async verifyPin(pin) {
+    return this.fetchWithError(`${API_BASE_URL}/verify-pin`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pin: pin
+      }),
+    });
+  }
+
+  // Get all PINs
+  async getPins() {
+    return this.fetchWithError(`${API_BASE_URL}/pins`, {
+      method: 'GET',
+    });
+  }
+
+  // Create new PIN
+  async createPin(pin, userName) {
+    return this.fetchWithError(`${API_BASE_URL}/pin`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pin: pin,
+        user_name: userName
+      }),
+    });
   }
 }
 
-export default ApiService;
+const apiService = new ApiService();
+export default apiService;

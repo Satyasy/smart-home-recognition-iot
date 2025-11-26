@@ -1,9 +1,9 @@
 Flask
-flask-cors
-face-recognition
+deepface
 opencv-python
 numpy
 firebase-admin
 Pillow
-dlib
-cmake
+tensorflow-cpu==2.20.0
+tf-keras
+protobuf

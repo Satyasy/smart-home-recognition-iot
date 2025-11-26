@@ -1,456 +1,301 @@
-# 🏠 Smart Home Face Recognition System
+# Smart Home Face Recognition System
 
-Sistem keamanan pintu pintar dengan face recognition menggunakan **ESP32-CAM** (camera only) + **ESP8266** (controller) + **Flask API** + **React Dashboard**.
+Sistem keamanan pintu pintar menggunakan ESP32-CAM untuk face recognition, terintegrasi dengan React frontend dan Flask backend.
 
-## 📖 Documentation
-
-- **[WIRING_GUIDE.md](WIRING_GUIDE.md)** - Complete hardware wiring diagram
-- **[ARDUINO_LIBRARIES.md](ARDUINO_LIBRARIES.md)** - Arduino libraries installation guide
-- **[SYSTEM_ARCHITECTURE.md](SYSTEM_ARCHITECTURE.md)** - System architecture & data flow
-
-## 🎯 System Overview
+## 🏗️ Arsitektur Sistem
 
 ```
-ESP32-CAM (Camera) → Flask API (Face Recognition) → ESP8266 (Controller)
-                                                          ↓
-                                              Servo + LED + Buzzer + Sensors
+┌─────────────────┐      ┌─────────────────┐      ┌─────────────────┐
+│   ESP32-CAM     │─────▶│  Flask Backend  │◀────▶│ Firebase RTDB   │
+│  (Face Capture) │      │ (Face Recognition)│     │  (Database)     │
+└─────────────────┘      └─────────────────┘      └─────────────────┘
+                                  ▲
+                                  │
+                                  ▼
+                         ┌─────────────────┐
+                         │ React Frontend  │
+                         │   (Dashboard)   │
+                         └─────────────────┘
 ```
 
-**Alur Kerja:**
-1. **ESP32-CAM** capture foto wajah
-2. Kirim ke **Flask Server** untuk face recognition
-3. Flask mengenali wajah dari database Firebase
-4. Hasil dikirim ke **ESP8266**
-5. ESP8266 buka pintu (servo) jika authorized, atau buzzer jika denied
+## 📋 Fitur
 
-## 🚀 Features
+### Backend (Flask + face_recognition)
+- ✅ Face recognition menggunakan library `face_recognition` (dlib)
+- ✅ Register user baru dengan foto wajah
+- ✅ Recognize wajah dari ESP32-CAM
+- ✅ Verify dua wajah apakah sama
+- ✅ CRUD operations untuk user management
+- ✅ Access logs dengan timestamp
+- ✅ Firebase Realtime Database integration
+- ✅ RESTful API endpoints
 
-- ✅ Face Recognition menggunakan `face_recognition` library (dlib)
-- ✅ ESP32-CAM hanya untuk kamera (tidak pakai sensor/aktuator)
-- ✅ ESP8266 sebagai controller utama (servo, LED, buzzer, DHT, LDR, ultrasonic)
-- ✅ Real-time monitoring semua sensor
-- ✅ Access logs dengan Firebase Realtime Database
-- ✅ Dashboard web interaktif dengan React
-- ✅ Manajemen user (register, delete)
-- ✅ Auto-lock setelah 5 detik
-- ✅ Activity charts dan statistics
-
-## 📋 Prerequisites
-
-### Software
-- Python 3.13
-- Node.js 18+
-- Arduino IDE 1.8.19+
-- Firebase Account
+### Frontend (React)
+- ✅ Real-time camera feed dari ESP32-CAM
+- ✅ Live face recognition display
+- ✅ User registration modal
+- ✅ Access logs history
+- ✅ Activity charts
+- ✅ Sensor status monitoring (PIR, Servo, LED, Buzzer)
+- ✅ Responsive dashboard dengan TailwindCSS
 
 ### Hardware
-- 1x ESP32-CAM (AI-Thinker)
-- 1x NodeMCU ESP8266
-- 1x Servo Motor SG90
-- 2x LED (Red & Green)
-- 1x Buzzer
-- 1x DHT11 Sensor
-- 1x LDR + 10kΩ Resistor
-- 1x HC-SR04 Ultrasonic
-- Breadboard & Jumper Wires
+- ESP32-CAM untuk camera feed
+- PIR Motion Sensor
+- Servo motor untuk door lock
+- LED indicators (Red/Green)
+- Buzzer untuk alert
 
-## 🛠️ Installation
+## 🚀 Setup & Installation
 
-### Step 1: Backend Setup (Flask)
+### 1. Backend Setup
 
-1. **Create virtual environment:**
 ```powershell
+# Buat virtual environment
 python -m venv .venv
-.venv\Scripts\activate
-```
 
-2. **Install dependencies:**
-```powershell
+# Aktivasi virtual environment
+.venv\Scripts\Activate.ps1
+
+# Install dependencies
+pip install Flask face_recognition opencv-python numpy firebase-admin Pillow cmake dlib
+
+# Atau install dari requirements.txt
 pip install -r requirements.txt
-```
 
-3. **Setup Firebase:**
-   - Buat project di [Firebase Console](https://console.firebase.google.com)
-   - Enable Realtime Database
-   - Download `serviceAccountKey.json` 
-   - Letakkan di root folder project
-   - Update `databaseURL` di `app_face_recognition.py`
-
-4. **Run Flask server:**
-```powershell
+# Jalankan backend server
 python app_face_recognition.py
 ```
 
-Server akan running di `http://localhost:5000`
+Backend akan berjalan di: `http://localhost:5000`
 
-### Step 2: Frontend Setup (React)
+### 2. Frontend Setup
 
-1. **Navigate to frontend folder:**
 ```powershell
+# Masuk ke folder frontend
 cd smart-home-recognition
-```
 
-2. **Install dependencies:**
-```powershell
+# Install dependencies
 npm install
-```
 
-3. **Start development server:**
-```powershell
+# Konfigurasi environment variables
+# Edit file .env dan sesuaikan IP address
+
+# Jalankan development server
 npm start
 ```
 
-Frontend akan running di `http://localhost:3000`
+Frontend akan berjalan di: `http://localhost:3000`
 
-### Step 3: Arduino Setup
+## ⚙️ Konfigurasi
 
-1. **Install Arduino IDE** (v1.8.19+)
+### Backend Configuration
 
-2. **Install Board Support:**
-   - ESP32: `https://dl.espressif.com/dl/package_esp32_index.json`
-   - ESP8266: `http://arduino.esp8266.com/stable/package_esp8266com_index.json`
+Edit `app_face_recognition.py`:
 
-3. **Install Libraries:**
-   - ArduinoJson (v6.x)
-   - DHT sensor library (Adafruit)
-   - Adafruit Unified Sensor
-   - Base64 (untuk ESP32-CAM)
+```python
+# Firebase configuration
+'databaseURL': 'https://your-database.firebaseio.com/'
 
-   Lihat [ARDUINO_LIBRARIES.md](ARDUINO_LIBRARIES.md) untuk detail lengkap.
-
-4. **Upload Code:**
-
-   **ESP8266 (Upload Dulu!):**
-   ```
-   File: esp_code/esp8266_main.ino
-   Board: NodeMCU 1.0 (ESP-12E Module)
-   Upload Speed: 115200
-   
-   Update WiFi credentials:
-   - const char* ssid = "YOUR_WIFI";
-   - const char* password = "YOUR_PASSWORD";
-   
-   Upload → Catat IP Address dari Serial Monitor!
-   ```
-
-   **ESP32-CAM (Upload Kedua):**
-   ```
-   File: esp_code/esp32cam_face_only.ino
-   Board: AI Thinker ESP32-CAM
-   Upload Speed: 115200
-   
-   Update configuration:
-   - const char* ssid = "YOUR_WIFI";
-   - const char* password = "YOUR_PASSWORD";
-   - const char* flaskServerUrl = "http://YOUR_PC_IP:5000/api/recognize";
-   - const char* esp8266Ip = "http://ESP8266_IP"; // IP dari step ESP8266
-   
-   ⚠️ Short IO0 to GND saat upload!
-   ```
-
-### Step 4: Hardware Wiring
-
-Lihat [WIRING_GUIDE.md](WIRING_GUIDE.md) untuk diagram lengkap.
-
-**ESP32-CAM:**
-- Hanya kamera built-in (tidak ada wiring tambahan)
-- Power: 5V 2A adaptor
-
-**ESP8266 Connections:**
+# Face recognition threshold (default: 0.6)
+TOLERANCE = 0.6  # Lower = more strict
 ```
-D0 (GPIO16) → LED Red
-D8 (GPIO15) → LED Green
-D4 (GPIO2)  → Buzzer
-D3 (GPIO0)  → Servo Signal
-D1 (GPIO5)  → DHT11 Data
-D5 (GPIO14) → Ultrasonic Trig
-D6 (GPIO12) → Ultrasonic Echo
-A0          → LDR (via 10kΩ resistor)
+
+### Frontend Configuration
+
+Edit `.env`:
+
+```env
+# ESP32-CAM IP Address
+REACT_APP_ESP32CAM_IP=192.168.5.96
+
+# Flask Backend URL
+REACT_APP_API_URL=http://localhost:5000/api
 ```
+
+### Firebase Setup
+
+1. Buat project di [Firebase Console](https://console.firebase.google.com/)
+2. Enable Realtime Database
+3. Download `serviceAccountKey.json`
+4. Letakkan di root folder project
+5. Update database URL di `app_face_recognition.py`
 
 ## 📡 API Endpoints
 
-### Flask Server (http://localhost:5000)
+### User Management
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/health` | Health check |
-| POST | `/api/recognize` | Face recognition (from ESP32-CAM) |
-| POST | `/api/register` | Register new user with face |
-| GET | `/api/users` | Get all registered users |
-| GET | `/api/user/{id}` | Get user detail |
-| PUT | `/api/user/{id}` | Update user info |
-| DELETE | `/api/user/{id}` | Delete user |
-| GET | `/api/logs` | Get access logs |
-| DELETE | `/api/logs/clear` | Clear all logs |
-| GET | `/api/config` | Get system configuration |
-
-### ESP8266 Web Server (http://ESP8266_IP)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/face-result` | Receive face recognition result (from ESP32-CAM) |
-| GET | `/status` | Get sensor status & door state |
-| GET | `/unlock` | Manual door unlock |
-| GET | `/lock` | Manual door lock |
-
-## 🔧 Configuration
-
-### 1. Flask Server (`app_face_recognition.py`)
-
-```python
-# Face recognition tolerance (0.6 default, lower = more strict)
-TOLERANCE = 0.6
-
-# Firebase Database URL
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://your-project.firebaseio.com/'
-})
+```
+POST   /api/register          - Register user baru
+POST   /api/recognize          - Recognize wajah
+POST   /api/verify             - Verify dua wajah
+GET    /api/users              - Get semua users
+GET    /api/user/:id           - Get user by ID
+PUT    /api/user/:id           - Update user
+DELETE /api/user/:id           - Delete user
 ```
 
-### 2. Frontend (`src/services/api.js`)
+### Logs & System
+
+```
+GET    /api/logs               - Get access logs
+DELETE /api/logs/clear         - Clear semua logs
+GET    /api/config             - Get system configuration
+GET    /api/health             - Health check
+```
+
+### Example Request - Register User
 
 ```javascript
-const API_BASE_URL = 'http://localhost:5000/api';
+POST /api/register
+Content-Type: application/json
+
+{
+  "image": "base64_encoded_image_string",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phone": "08123456789"
+}
 ```
 
-### 3. ESP32-CAM (`esp_code/esp32cam_face_only.ino`)
+### Example Response
 
-```cpp
-// WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-
-// Server URLs
-const char* flaskServerUrl = "http://192.168.1.50:5000/api/recognize"; // PC IP
-const char* esp8266Ip = "http://192.168.1.100"; // ESP8266 IP
-
-// Capture interval (milliseconds)
-const unsigned long CAPTURE_INTERVAL = 3000; // 3 seconds
+```json
+{
+  "success": true,
+  "message": "User John Doe registered successfully",
+  "user_id": "user_20250126123456"
+}
 ```
 
-### 4. ESP8266 (`esp_code/esp8266_main.ino`)
+## 🔧 ESP32-CAM Setup
 
-```cpp
-// WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+### Upload Code
 
-// Pin definitions (sesuaikan jika perlu)
-const int servoPin = D3;   // Servo signal
-const int buzzPin = D4;    // Buzzer
-const int ledRedPin = D0;  // LED Red
-const int ledGreenPin = D8; // LED Green
-```
+1. Buka `esp_code/esp32_face_recognition.ino`
+2. Update WiFi credentials
+3. Update server IP addresses
+4. Upload ke ESP32-CAM menggunakan Arduino IDE
 
-## 🎬 How It Works
-
-### Complete Flow
-
-1. **ESP32-CAM** menangkap foto setiap 3 detik
-2. Convert image ke **base64** format
-3. Kirim ke **Flask Server** via HTTP POST `/api/recognize`
-4. Flask melakukan **face recognition** dengan database Firebase
-5. Flask return hasil: `{ "authorized": true/false, "user": {...} }`
-6. ESP32-CAM forward hasil ke **ESP8266** via HTTP POST `/face-result`
-7. **ESP8266** ambil keputusan:
-   - ✅ **Authorized** → Servo unlock (90°), LED hijau, auto-lock 5s
-   - ❌ **Denied** → Buzzer berbunyi, LED merah blink
-8. Log disimpan ke **Firebase RTDB**
-9. **React Dashboard** monitoring real-time
-
-### Face Recognition Flow
+### ESP32-CAM Stream URL
 
 ```
-[ESP32-CAM] → Capture Image
-     ↓
-[Flask API] → Face Detection
-     ↓
-[Firebase] → Compare with Database
-     ↓
-[Flask API] → Return Result (authorized/denied)
-     ↓
-[ESP32-CAM] → Send to ESP8266
-     ↓
-[ESP8266] → Control Actuators
-     ↓
-[Servo/LED/Buzzer] → Physical Action
+http://<ESP32_IP>/stream
 ```
 
-## 📊 Firebase Database Structure
+## 📊 Database Structure (Firebase)
+
+### Users Collection
 
 ```json
 {
   "users": {
-    "user_20241125120000": {
+    "user_20250126123456": {
       "name": "John Doe",
       "email": "john@example.com",
       "phone": "08123456789",
-      "face_encoding": [0.123, -0.456, ...],
-      "registered_at": "2024-11-25T12:00:00",
+      "face_encoding": [...],
+      "registered_at": "2025-01-26T12:34:56",
       "status": "active",
       "model": "face_recognition"
     }
-  },
-  "access_logs": {
-    "-NxYZ123abc": {
-      "timestamp": "2024-11-25T12:05:00",
-      "authorized": true,
-      "user_id": "user_20241125120000",
-      "user_name": "John Doe",
-      "confidence": 95.5
-    }
-  },
-  "sensors": {
-    "pir": { "motion": false },
-    "servo": { "angle": 0, "locked": true },
-    "led": { "red": true, "green": false },
-    "buzzer": { "active": false }
   }
 }
 ```
 
-## 🎨 Frontend Features
+### Access Logs Collection
 
-### Dashboard Components
-- **CameraFeed**: Live stream dari ESP32-CAM
-- **SensorStatus**: Status sensor real-time
-- **ActuatorControl**: Kontrol servo, LED, buzzer
-- **AccessLog**: History akses masuk/keluar
-- **SecurityChart**: Grafik aktivitas
-- **UsersList**: Manajemen user
-
-### Available Actions
-- ✅ Register new user dengan foto
-- ✅ View all registered users
-- ✅ Delete user
-- ✅ View access logs
-- ✅ Real-time sensor monitoring
-
-## 🔐 Security
-
-- Face encodings disimpan di Firebase (tidak menyimpan foto)
-- HTTPS recommended untuk production
-- Firebase Security Rules harus diatur
-- Rate limiting untuk API endpoints
-
-## 🧪 Testing
-
-### 1. Test Flask Server
-```powershell
-# Run server
-python app_face_recognition.py
-
-# Test endpoint (browser or curl)
-http://localhost:5000/api/health
-
-# Expected response:
+```json
 {
-  "status": "healthy",
-  "model": "face_recognition",
-  "timestamp": "..."
+  "access_logs": {
+    "log_id_1": {
+      "timestamp": "2025-01-26T12:34:56",
+      "authorized": true,
+      "user_id": "user_20250126123456",
+      "user_name": "John Doe",
+      "confidence": 95.5
+    }
+  }
 }
 ```
-
-### 2. Test ESP8266
-```powershell
-# Upload code and open Serial Monitor (115200 baud)
-# Expected output:
-- WiFi Connected
-- IP Address: 192.168.1.100
-- Web server started
-- System is ready!
-
-# Test web server (browser)
-http://192.168.1.100/status
-```
-
-### 3. Test ESP32-CAM
-```powershell
-# Upload code and open Serial Monitor (115200 baud)
-# Expected output:
-- Camera initialized successfully
-- WiFi Connected
-- IP Address: 192.168.1.101
-- System is ready!
-- Capturing image...
-```
-
-### 4. Test Full System
-1. Register user via web dashboard (http://localhost:3000)
-2. Upload foto wajah
-3. Letakkan wajah di depan ESP32-CAM
-4. Monitor Serial Monitor kedua device
-5. Verify: ESP8266 membuka pintu (servo bergerak)
 
 ## 🐛 Troubleshooting
 
 ### Backend Issues
 
-**Problem:** TensorFlow DLL Error
-**Solution:** Sudah fixed! Menggunakan `face_recognition` library (dlib)
+**Problem:** DLL load failed while importing tensorflow
 
-**Problem:** Flask server tidak bisa diakses dari ESP32
+**Solution:** Gunakan `app_face_recognition.py` yang menggunakan library `face_recognition` instead of DeepFace/TensorFlow
+
+**Problem:** Firebase connection error
+
 **Solution:** 
-- Check firewall Windows
-- Pastikan Flask run di `0.0.0.0` bukan `127.0.0.1`
-- Cek IP address dengan `ipconfig`
+- Pastikan `serviceAccountKey.json` ada
+- Check database URL di config
+- Verify Firebase rules
 
-### Hardware Issues
+### Frontend Issues
 
-**Problem:** ESP32-CAM tidak bisa upload
+**Problem:** Cannot connect to backend
+
 **Solution:**
-- Short IO0 ke GND saat upload
-- Gunakan adaptor 5V 2A (bukan USB PC)
-- Lepas short setelah upload
+- Pastikan backend running di port 5000
+- Check CORS settings
+- Verify API_URL di `.env`
 
-**Problem:** Servo tidak bergerak
-**Solution:**
-- Check power supply (minimal 5V 1A)
-- Check wiring signal ke D3
-- Test manual: `doorServo.write(90);`
+**Problem:** Camera feed not showing
 
-**Problem:** Camera capture failed
 **Solution:**
-- Adaptor power kurang (minimal 2A)
-- Frame size terlalu besar (ganti ke VGA)
+- Verify ESP32-CAM IP address
+- Check ESP32-CAM is powered and connected to WiFi
+- Test stream URL directly in browser
+
+### ESP32-CAM Issues
+
+**Problem:** Camera initialization failed
+
+**Solution:**
 - Reset ESP32-CAM
+- Check power supply (5V 2A minimum)
+- Verify camera module connection
 
-**Problem:** ESP8266 tidak terima data dari ESP32-CAM
-**Solution:**
-- Check IP address ESP8266 di Serial Monitor
-- Update IP di code ESP32-CAM
-- Pastikan kedua device di network yang sama
-- Check endpoint `/face-result`
+## 📝 Tech Stack
 
-### Network Issues
+- **Backend:** Python 3.13, Flask, face_recognition (dlib), OpenCV
+- **Frontend:** React 18, TailwindCSS, Lucide Icons, Recharts
+- **Database:** Firebase Realtime Database
+- **Hardware:** ESP32-CAM, PIR Sensor, Servo Motor, LED, Buzzer
 
-**Problem:** WiFi tidak connect
-**Solution:**
-- SSID dan password benar?
-- WiFi harus 2.4GHz (bukan 5GHz)
-- Jarak ke router terlalu jauh
-- Reset dan upload ulang
+## 🎯 Future Improvements
 
-**Problem:** ESP32-CAM tidak bisa kirim ke Flask
-**Solution:**
-- Check firewall PC
-- Pastikan Flask server running
-- Check IP address PC dengan `ipconfig`
-- Test dengan Postman dulu
+- [ ] Real-time WebSocket connection untuk instant updates
+- [ ] Multiple camera support
+- [ ] Mobile app (React Native)
+- [ ] Face recognition dengan mask detection
+- [ ] Email/SMS notifications
+- [ ] Advanced analytics dashboard
+- [ ] MQTT protocol integration
+- [ ] Cloud deployment (Heroku/AWS)
 
-## 📝 License
+## 👨‍💻 Development
 
-MIT License
+```powershell
+# Backend (Terminal 1)
+.venv\Scripts\python.exe app_face_recognition.py
 
-## 👨‍💻 Author
+# Frontend (Terminal 2)
+cd smart-home-recognition
+npm start
+```
 
-Smart Home Face Recognition System with ESP32-CAM
+## 📄 License
+
+MIT License - Feel free to use for your projects!
 
 ## 🤝 Contributing
 
-Pull requests are welcome!
+Contributions are welcome! Please open an issue or submit a pull request.
 
-## 📞 Support
+---
 
-Jika ada masalah, silakan buat issue di repository ini.
+**Made with ❤️ for Smart Home Security**

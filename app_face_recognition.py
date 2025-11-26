@@ -12,7 +12,7 @@ import tempfile
 import shutil
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS untuk semua routes
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Initialize Firebase
 cred = credentials.Certificate('serviceAccountKey.json')
@@ -23,9 +23,13 @@ firebase_admin.initialize_app(cred, {
 # Reference ke Firebase RTDB
 users_ref = db.reference('users')
 logs_ref = db.reference('access_logs')
+pins_ref = db.reference('pins')
 
 # Threshold untuk face recognition (0.6 is default, lower = more strict)
 TOLERANCE = 0.6
+
+# Default PIN
+DEFAULT_PIN = "0000"
 
 # Temporary directory untuk menyimpan images
 TEMP_DIR = tempfile.mkdtemp()
@@ -241,17 +245,14 @@ def recognize_face():
                 if distance < best_distance:
                     best_distance = distance
                     confidence = round((1 - distance) * 100, 2)
-                    
-                    # Filter: Hanya terima akurasi >= 70%
-                    if confidence >= 70.0:
-                        best_match = {
-                            'user_id': user_id,
-                            'name': user_info['name'],
-                            'email': user_info['email'],
-                            'phone': user_info['phone'],
-                            'confidence': confidence,
-                            'distance': round(float(distance), 4)
-                        }
+                    best_match = {
+                        'user_id': user_id,
+                        'name': user_info['name'],
+                        'email': user_info['email'],
+                        'phone': user_info['phone'],
+                        'confidence': confidence,
+                        'distance': round(float(distance), 4)
+                    }
         
         # Log access attempt
         log_data = {
@@ -274,7 +275,7 @@ def recognize_face():
             return jsonify({
                 'success': True,
                 'authorized': False,
-                'message': 'Face not recognized or confidence < 70%'
+                'message': 'Face not recognized or confidence too low'
             }), 200
         
     except Exception as e:
@@ -556,6 +557,205 @@ def health_check():
         'model': 'face_recognition',
         'version': '2.0.1'
     }), 200
+
+@app.route('/api/verify-pin', methods=['POST'])
+def verify_pin():
+    """
+    Verify PIN untuk alternatif face recognition
+    Body: {
+        "pin": "0000"
+    }
+    Response: {
+        "success": true/false,
+        "authorized": true/false,
+        "message": "..."
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data or 'pin' not in data:
+            return jsonify({
+                'success': False,
+                'authorized': False,
+                'message': 'No PIN provided'
+            }), 400
+        
+        input_pin = data['pin']
+        
+        # Check di Firebase untuk PIN yang registered
+        registered_pins = pins_ref.get()
+        
+        authorized = False
+        user_name = 'Unknown'
+        
+        # Check default PIN
+        if input_pin == DEFAULT_PIN:
+            authorized = True
+            user_name = 'Default PIN'
+        # Check registered PINs
+        elif registered_pins:
+            for pin_id, pin_data in registered_pins.items():
+                if pin_data.get('pin') == input_pin and pin_data.get('status') == 'active':
+                    authorized = True
+                    user_name = pin_data.get('user_name', 'PIN User')
+                    break
+        
+        # Log access attempt
+        log_data = {
+            'timestamp': datetime.now().isoformat(),
+            'authorized': authorized,
+            'user_id': 'pin_user' if authorized else 'unknown',
+            'user_name': user_name,
+            'confidence': 100 if authorized else 0,
+            'method': 'PIN'
+        }
+        logs_ref.push(log_data)
+        
+        if authorized:
+            return jsonify({
+                'success': True,
+                'authorized': True,
+                'user': {
+                    'name': user_name,
+                    'method': 'PIN',
+                    'confidence': 100
+                },
+                'message': f'Welcome {user_name}!'
+            }), 200
+        else:
+            return jsonify({
+                'success': True,
+                'authorized': False,
+                'message': 'Invalid PIN'
+            }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'authorized': False,
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+@app.route('/api/pins', methods=['GET'])
+def get_pins():
+    """Get all registered PINs (without showing actual PIN)"""
+    try:
+        pins = pins_ref.get()
+        
+        if not pins:
+            return jsonify({
+                'success': True,
+                'pins': [],
+                'count': 0
+            }), 200
+        
+        pins_list = []
+        for pin_id, pin_data in pins.items():
+            pins_list.append({
+                'pin_id': pin_id,
+                'user_name': pin_data.get('user_name', ''),
+                'created_at': pin_data.get('created_at', ''),
+                'status': pin_data.get('status', 'active')
+            })
+        
+        return jsonify({
+            'success': True,
+            'pins': pins_list,
+            'count': len(pins_list)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+@app.route('/api/pin', methods=['POST'])
+def create_pin():
+    """
+    Create new PIN
+    Body: {
+        "pin": "1234",
+        "user_name": "John Doe"
+    }
+    """
+    try:
+        data = request.json
+        
+        if not data or 'pin' not in data or 'user_name' not in data:
+            return jsonify({
+                'success': False,
+                'message': 'Missing required fields: pin and user_name'
+            }), 400
+        
+        # Validate PIN format (4 digits)
+        pin = data['pin']
+        if not pin.isdigit() or len(pin) != 4:
+            return jsonify({
+                'success': False,
+                'message': 'PIN must be 4 digits'
+            }), 400
+        
+        # Check if PIN already exists
+        registered_pins = pins_ref.get()
+        if registered_pins:
+            for pin_id, pin_data in registered_pins.items():
+                if pin_data.get('pin') == pin:
+                    return jsonify({
+                        'success': False,
+                        'message': f'PIN already registered to {pin_data.get("user_name")}'
+                    }), 400
+        
+        # Generate PIN ID
+        pin_id = f"pin_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        
+        # Save to Firebase
+        pin_data = {
+            'pin': pin,
+            'user_name': data['user_name'],
+            'created_at': datetime.now().isoformat(),
+            'status': 'active'
+        }
+        
+        pins_ref.child(pin_id).set(pin_data)
+        
+        return jsonify({
+            'success': True,
+            'message': f'PIN created successfully for {data["user_name"]}',
+            'pin_id': pin_id
+        }), 201
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Server error: {str(e)}'
+        }), 500
+
+@app.route('/api/pin/<pin_id>', methods=['DELETE'])
+def delete_pin(pin_id):
+    """Delete PIN"""
+    try:
+        pin = pins_ref.child(pin_id).get()
+        
+        if not pin:
+            return jsonify({
+                'success': False,
+                'message': 'PIN not found'
+            }), 404
+        
+        pins_ref.child(pin_id).delete()
+        
+        return jsonify({
+            'success': True,
+            'message': f'PIN for {pin.get("user_name", pin_id)} deleted successfully'
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': f'Server error: {str(e)}'
+        }), 500
 
 # Cleanup temporary directory on shutdown
 import atexit

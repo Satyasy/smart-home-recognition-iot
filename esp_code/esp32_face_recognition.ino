@@ -222,85 +222,280 @@ void recognizeFace() {
   }
 }
 
-void unlockDoor() {
-  Serial.println("Unlocking door...");
-  doorLocked = false;
-  
-  // Control actuators
-  doorServo.write(90); // Unlock position
-  digitalWrite(LED_RED, LOW);
-  digitalWrite(LED_GREEN, HIGH);
-  
-  // Update Firebase
-  updateFirebase("servo/angle", 90);
-  updateFirebase("servo/locked", false);
-  updateFirebase("led/red", false);
-  updateFirebase("led/green", true);
-  
-  // Auto lock after 5 seconds
-  delay(5000);
-  lockDoor();
-}
-
-void lockDoor() {
-  Serial.println("Locking door...");
-  doorLocked = true;
-  
-  // Control actuators
-  doorServo.write(0); // Lock position
-  digitalWrite(LED_RED, HIGH);
-  digitalWrite(LED_GREEN, LOW);
-  
-  // Update Firebase
-  updateFirebase("servo/angle", 0);
-  updateFirebase("servo/locked", true);
-  updateFirebase("led/red", true);
-  updateFirebase("led/green", false);
-}
-
-void triggerAlert() {
-  Serial.println("Alert triggered!");
-  
-  // Activate buzzer
-  for(int i = 0; i < 3; i++) {
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(200);
-    digitalWrite(BUZZER_PIN, LOW);
-    delay(200);
-  }
-  
-  // Update Firebase
-  updateFirebase("buzzer/active", true);
-  delay(1000);
-  updateFirebase("buzzer/active", false);
-}
-
-void updateSensorData(bool motion) {
-  updateFirebase("pir/motion", motion);
-}
-
-void updateFirebase(String path, bool value) {
+// ===== Send Unlock Command to ESP8266 =====
+void unlockDoorViaESP8266(const char* userName) {
   if(WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    String url = String(firebaseUrl) + "/sensors/" + path + ".json";
-    http.begin(url);
+    String unlockUrl = String(esp8266Server) + "/unlock";
+    
+    http.begin(unlockUrl);
     http.addHeader("Content-Type", "application/json");
     
-    String payload = value ? "true" : "false";
-    http.PUT(payload);
+    // Send unlock with face recognition
+    DynamicJsonDocument doc(256);
+    doc["method"] = "face";
+    doc["user"] = userName;
+    
+    String jsonPayload;
+    serializeJson(doc, jsonPayload);
+    
+    int httpResponseCode = http.POST(jsonPayload);
+    
+    if (httpResponseCode > 0) {
+      Serial.println("[ESP8266] Door unlocked via ESP8266");
+    } else {
+      Serial.printf("[ESP8266] Unlock failed: %d\n", httpResponseCode);
+    }
+    
     http.end();
   }
 }
 
-void updateFirebase(String path, int value) {
+// ===== Trigger Alert via ESP8266 =====
+void triggerAlertViaESP8266() {
   if(WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    String url = String(firebaseUrl) + "/sensors/" + path + ".json";
-    http.begin(url);
+    String buzzerUrl = String(esp8266Server) + "/buzzer";
+    
+    http.begin(buzzerUrl);
     http.addHeader("Content-Type", "application/json");
     
-    String payload = String(value);
-    http.PUT(payload);
+    DynamicJsonDocument doc(128);
+    doc["active"] = true;
+    
+    String jsonPayload;
+    serializeJson(doc, jsonPayload);
+    
+    http.POST(jsonPayload);
     http.end();
+    
+    Serial.println("[ESP8266] Alert triggered");
   }
+}
+
+// ===== Camera Stream Handler =====
+static esp_err_t stream_handler(httpd_req_t *req) {
+  camera_fb_t * fb = NULL;
+  esp_err_t res = ESP_OK;
+  size_t _jpg_buf_len = 0;
+  uint8_t * _jpg_buf = NULL;
+  char * part_buf[64];
+
+  res = httpd_resp_set_type(req, "multipart/x-mixed-replace; boundary=frame");
+  if(res != ESP_OK){
+    return res;
+  }
+
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  while(true){
+    fb = esp_camera_fb_get();
+    if (!fb) {
+      Serial.println("Camera capture failed");
+      res = ESP_FAIL;
+    } else {
+      if(fb->width > 400){
+        if(fb->format != PIXFORMAT_JPEG){
+          bool jpeg_converted = frame2jpg(fb, 80, &_jpg_buf, &_jpg_buf_len);
+          esp_camera_fb_return(fb);
+          fb = NULL;
+          if(!jpeg_converted){
+            Serial.println("JPEG compression failed");
+            res = ESP_FAIL;
+          }
+        } else {
+          _jpg_buf_len = fb->len;
+          _jpg_buf = fb->buf;
+        }
+      }
+    }
+    if(res == ESP_OK){
+      size_t hlen = snprintf((char *)part_buf, 64, "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n", _jpg_buf_len);
+      res = httpd_resp_send_chunk(req, (const char *)part_buf, hlen);
+    }
+    if(res == ESP_OK){
+      res = httpd_resp_send_chunk(req, (const char *)_jpg_buf, _jpg_buf_len);
+    }
+    if(res == ESP_OK){
+      res = httpd_resp_send_chunk(req, "\r\n--frame\r\n", 11);
+    }
+    if(fb){
+      esp_camera_fb_return(fb);
+      fb = NULL;
+      _jpg_buf = NULL;
+    } else if(_jpg_buf){
+      free(_jpg_buf);
+      _jpg_buf = NULL;
+    }
+    if(res != ESP_OK){
+      break;
+    }
+  }
+  return res;
+}
+
+// ===== Start Camera Stream Server =====
+void startCameraStream() {
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.server_port = 81;
+
+  httpd_uri_t stream_uri = {
+    .uri       = "/stream",
+    .method    = HTTP_GET,
+    .handler   = stream_handler,
+    .user_ctx  = NULL
+  };
+
+  Serial.print("Starting stream server on port: ");
+  Serial.println(config.server_port);
+  
+  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
+    httpd_register_uri_handler(stream_httpd, &stream_uri);
+    Serial.println("✅ Stream server started successfully");
+  }
+}
+
+// ===== HTTP Handlers =====
+void handleRoot() {
+  String html = R"(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32-CAM Face Recognition</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { 
+      font-family: Arial; 
+      margin: 20px; 
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      text-align: center;
+    }
+    .container { 
+      background: rgba(255,255,255,0.1); 
+      backdrop-filter: blur(10px);
+      padding: 20px; 
+      border-radius: 15px; 
+      max-width: 800px; 
+      margin: 0 auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    h1 { margin-top: 0; }
+    .status { 
+      padding: 15px; 
+      background: rgba(76, 175, 80, 0.3); 
+      border-radius: 10px; 
+      margin: 15px 0;
+      border: 2px solid rgba(76, 175, 80, 0.5);
+    }
+    img { 
+      width: 100%; 
+      max-width: 640px; 
+      border-radius: 10px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .button {
+      background: rgba(33, 150, 243, 0.8);
+      color: white;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      margin: 10px;
+      transition: all 0.3s;
+    }
+    .button:hover {
+      background: rgba(33, 150, 243, 1);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(33, 150, 243, 0.4);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📷 ESP32-CAM Face Recognition</h1>
+    <div class="status">✅ Camera Online</div>
+    
+    <h2>🎥 Live Stream</h2>
+    <img src="http://)";
+  
+  html += WiFi.localIP().toString();
+  html += R"(:81/stream" alt="Camera Stream">
+    
+    <div>
+      <button class="button" onclick="location.reload()">🔄 Refresh</button>
+      <button class="button" onclick="capture()">📸 Capture & Recognize</button>
+    </div>
+    
+    <p style="margin-top: 30px; opacity: 0.8;">
+      <strong>Stream URL:</strong><br>
+      http://)";
+  html += WiFi.localIP().toString();
+  html += R"(:81/stream
+    </p>
+  </div>
+  
+  <script>
+    function capture() {
+      fetch('/capture')
+        .then(response => response.json())
+        .then(data => {
+          alert(data.message);
+        });
+    }
+  </script>
+</body>
+</html>
+  )";
+  
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "text/html", html);
+}
+
+void handleCapture() {
+  recognizeFace();
+  
+  DynamicJsonDocument doc(256);
+  doc["success"] = true;
+  doc["message"] = "Face recognition initiated";
+  
+  String response;
+  serializeJson(doc, response);
+  
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", response);
+}
+
+void handleStatus() {
+  DynamicJsonDocument doc(256);
+  doc["camera"] = "online";
+  doc["ip"] = WiFi.localIP().toString();
+  doc["stream_url"] = "http://" + WiFi.localIP().toString() + ":81/stream";
+  doc["rssi"] = WiFi.RSSI();
+  
+  String response;
+  serializeJson(doc, response);
+  
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.send(200, "application/json", response);
+}
+
+void handleOptions() {
+  server.sendHeader("Access-Control-Allow-Origin", "*");
+  server.sendHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  server.sendHeader("Access-Control-Allow-Headers", "Content-Type");
+  server.send(204);
+}
+
+// ===== Start Web Server =====
+void startWebServer() {
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/capture", HTTP_GET, handleCapture);
+  server.on("/status", HTTP_GET, handleStatus);
+  server.on("/capture", HTTP_OPTIONS, handleOptions);
+  server.on("/status", HTTP_OPTIONS, handleOptions);
+  
+  server.begin();
+  Serial.println("✅ HTTP server started on port 80");
 }
