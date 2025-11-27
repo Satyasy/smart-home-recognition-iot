@@ -78,6 +78,38 @@ unsigned long lastAutoRecognitionTime = 0;
 const unsigned long AUTO_RECOGNITION_INTERVAL = 5000; // 5 seconds
 const float AUTO_RECOGNITION_THRESHOLD = 0.50; // 50% confidence
 
+// ===== Handle Auto Recognition Toggle =====
+void handleAutoRecognitionToggle() {
+  enableCORS();
+  
+  if (server.hasArg("enabled")) {
+    String enabled = server.arg("enabled");
+    autoRecognitionEnabled = (enabled == "true" || enabled == "1");
+    
+    Serial.printf("[AUTO-RECOGNITION] %s\n", autoRecognitionEnabled ? "ENABLED" : "DISABLED");
+    
+    DynamicJsonDocument doc(256);
+    doc["success"] = true;
+    doc["autoRecognition"] = autoRecognitionEnabled;
+    doc["message"] = autoRecognitionEnabled ? "Auto-recognition enabled" : "Auto-recognition disabled";
+    
+    String response;
+    serializeJson(doc, response);
+    
+    server.send(200, "application/json", response);
+  } else {
+    // Return current status
+    DynamicJsonDocument doc(256);
+    doc["success"] = true;
+    doc["autoRecognition"] = autoRecognitionEnabled;
+    
+    String response;
+    serializeJson(doc, response);
+    
+    server.send(200, "application/json", response);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("\n\n=============================================");
@@ -119,11 +151,13 @@ void setup() {
   server.on("/status", HTTP_GET, handleStatus);
   server.on("/recognize", HTTP_POST, handleRecognizeFace);
   server.on("/flash", HTTP_GET, handleFlashControl);
+  server.on("/auto-recognition", HTTP_GET, handleAutoRecognitionToggle);
   
   // CORS preflight
   server.on("/capture", HTTP_OPTIONS, handleOptions);
   server.on("/status", HTTP_OPTIONS, handleOptions);
   server.on("/recognize", HTTP_OPTIONS, handleOptions);
+  server.on("/auto-recognition", HTTP_OPTIONS, handleOptions);
   
   server.begin();
   Serial.println("[OK] HTTP server started");
@@ -140,10 +174,19 @@ void setup() {
 void loop() {
   server.handleClient();
   
-  // Auto-recognition setiap 5 detik
+  // Auto-recognition setiap 5 detik (only if enabled)
   if (autoRecognitionEnabled && (millis() - lastAutoRecognitionTime >= AUTO_RECOGNITION_INTERVAL)) {
     lastAutoRecognitionTime = millis();
     performAutoRecognition();
+  }
+  
+  // Show status every 30 seconds
+  static unsigned long lastStatusLog = 0;
+  if (millis() - lastStatusLog >= 30000) {
+    lastStatusLog = millis();
+    Serial.printf("[STATUS] Auto-recognition: %s | Last result: %s\n", 
+                  autoRecognitionEnabled ? "ON" : "OFF", 
+                  lastRecognitionResult.c_str());
   }
   
   delay(10);
@@ -499,6 +542,7 @@ void handleStatus() {
   doc["camera"] = "ready";
   doc["last_recognition"] = lastRecognitionResult;
   doc["flash_brightness"] = flashBrightness;
+  doc["auto_recognition"] = autoRecognitionEnabled;
   
   String response;
   serializeJson(doc, response);
@@ -696,6 +740,10 @@ void performAutoRecognition() {
         bool authorized = responseDoc["authorized"] | false;
         String name = "Unknown";
         float confidence = 0.0;
+        String message = responseDoc["message"] | "";
+        
+        // Check if face was detected
+        bool faceDetected = !message.equals("No face detected");
         
         if (responseDoc.containsKey("user")) {
           name = responseDoc["user"]["name"] | "Unknown";
@@ -720,32 +768,48 @@ void performAutoRecognition() {
           // Send unlock command to ESP8266
           sendUnlockToESP8266(name, confidence / 100.0);
           
-        } else if (recognized && confidence < (AUTO_RECOGNITION_THRESHOLD * 100)) {
+        } else if (faceDetected && recognized && confidence < (AUTO_RECOGNITION_THRESHOLD * 100)) {
+          // ONLY trigger alert if FACE DETECTED with LOW CONFIDENCE
           Serial.println("\n========================================");
           Serial.println("         🟡 ACCESS DENIED");
           Serial.println("========================================");
           Serial.printf("👤 Detected: %s\n", name.c_str());
           Serial.printf("📊 Confidence: %.2f%% (< 50%% threshold)\n", confidence);
           Serial.println("❌ Confidence too low");
+          Serial.println("🚨 Triggering alert...");
           Serial.println("========================================\n");
           
           lastRecognitionResult = "DENIED: Low confidence (" + String((int)confidence) + "%)";
           
-          // Trigger alert on ESP8266
+          // Trigger alert on ESP8266 - ONLY for LOW CONFIDENCE face
           triggerAlertOnESP8266();
           
-        } else {
+        } else if (faceDetected && !recognized) {
+          // Face detected but NOT in database - trigger alert
           Serial.println("\n========================================");
           Serial.println("         🔴 ACCESS DENIED");
           Serial.println("========================================");
           Serial.println("❌ Face not recognized");
           Serial.println("⚠️ No match found in database");
+          Serial.println("🚨 Triggering alert...");
           Serial.println("========================================\n");
           
           lastRecognitionResult = "DENIED: Unknown face";
           
-          // Trigger alert on ESP8266
+          // Trigger alert on ESP8266 - for UNKNOWN face
           triggerAlertOnESP8266();
+          
+        } else {
+          // No face detected - just log, NO ALERT
+          Serial.println("\n========================================");
+          Serial.println("         ⚪ NO FACE DETECTED");
+          Serial.println("========================================");
+          Serial.println("ℹ️ No face in frame");
+          Serial.println("🔇 No alert (not a human face)");
+          Serial.println("========================================\n");
+          
+          lastRecognitionResult = "No face detected";
+          // NO ALERT TRIGGER - just skip
         }
       } else {
         Serial.println("[AUTO] ❌ Failed to parse JSON response");

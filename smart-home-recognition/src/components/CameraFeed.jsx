@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Activity, UserPlus, RefreshCw } from 'lucide-react';
+import { Camera, Activity, UserPlus, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import RegisterUser from './RegisterUser';
+import esp32CamService from '../services/esp32cam';
 
 const CameraFeed = ({ sensorData, doorStatus, onFaceRecognition, backendStatus }) => {
   const [cameraStream, setCameraStream] = useState('connecting');
   const [showRegister, setShowRegister] = useState(false);
   const [esp32CamUrl, setEsp32CamUrl] = useState('');
+  const [autoRecognitionEnabled, setAutoRecognitionEnabled] = useState(true);
+  const [toggleLoading, setToggleLoading] = useState(false);
   const imgRef = useRef(null);
 
   useEffect(() => {
@@ -14,7 +17,37 @@ const CameraFeed = ({ sensorData, doorStatus, onFaceRecognition, backendStatus }
     const streamUrl = `http://${camIp}/stream`;  // Stream endpoint (same port as API)
     setEsp32CamUrl(streamUrl);
     console.log('📷 ESP32-CAM Stream URL:', streamUrl);
+    
+    // Get initial auto-recognition status
+    loadAutoRecognitionStatus();
   }, []);
+
+  const loadAutoRecognitionStatus = async () => {
+    try {
+      const enabled = await esp32CamService.getAutoRecognitionStatus();
+      setAutoRecognitionEnabled(enabled);
+      console.log('🤖 Auto-recognition status:', enabled);
+    } catch (error) {
+      console.error('Failed to load auto-recognition status:', error);
+    }
+  };
+
+  const toggleAutoRecognition = async () => {
+    setToggleLoading(true);
+    try {
+      const newState = !autoRecognitionEnabled;
+      const response = await esp32CamService.toggleAutoRecognition(newState);
+      
+      if (response.success) {
+        setAutoRecognitionEnabled(newState);
+        console.log('🤖 Auto-recognition toggled:', newState ? 'ON' : 'OFF');
+      }
+    } catch (error) {
+      console.error('Failed to toggle auto-recognition:', error);
+    } finally {
+      setToggleLoading(false);
+    }
+  };
 
   const handleImageLoad = () => {
     setCameraStream('active');
@@ -53,6 +86,19 @@ const CameraFeed = ({ sensorData, doorStatus, onFaceRecognition, backendStatus }
           </span>
         </div>
         <div className="flex gap-2">
+          <button
+            onClick={toggleAutoRecognition}
+            disabled={toggleLoading}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors text-sm font-semibold ${
+              autoRecognitionEnabled 
+                ? 'bg-green-500/20 text-green-400 border border-green-500/50 hover:bg-green-500/30' 
+                : 'bg-gray-700 text-gray-400 border border-gray-600 hover:bg-gray-600'
+            } ${toggleLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={autoRecognitionEnabled ? 'Auto-recognition ON (Click to turn OFF for streaming)' : 'Auto-recognition OFF (Click to turn ON)'}
+          >
+            {autoRecognitionEnabled ? <Eye className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+            {toggleLoading ? 'Loading...' : autoRecognitionEnabled ? 'Auto-Scan ON' : 'Auto-Scan OFF'}
+          </button>
           <button
             onClick={refreshCamera}
             className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg transition-colors"
@@ -139,6 +185,18 @@ const CameraFeed = ({ sensorData, doorStatus, onFaceRecognition, backendStatus }
           </div>
         </div>
       </div>
+
+      {/* Auto-Recognition Info */}
+      {!autoRecognitionEnabled && (
+        <div className="mb-4 bg-blue-500/20 border border-blue-500 rounded-lg p-3">
+          <div className="flex items-center gap-2">
+            <Eye className="w-4 h-4 text-blue-400" />
+            <span className="text-blue-400 text-sm font-semibold">
+              ℹ️ Auto-scan disabled - Stream mode active. Turn ON Auto-Scan to enable automatic face recognition.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Ultrasonic Sensor Status */}
       <div className={`p-4 rounded-lg ${

@@ -141,6 +141,44 @@ class ESP32CamService {
     }
   }
 
+  // Toggle auto-recognition
+  async toggleAutoRecognition(enabled) {
+    try {
+      console.log('[ESP32-CAM] Setting auto-recognition:', enabled);
+      const response = await this.fetchWithTimeout(
+        `${ESP32_CAM_BASE_URL}/auto-recognition?enabled=${enabled}`,
+        {
+          method: 'GET',
+        }
+      );
+      
+      const data = await response.json();
+      console.log('[ESP32-CAM] Auto-recognition set:', data);
+      return data;
+    } catch (error) {
+      console.error('[ESP32-CAM] Auto-recognition toggle error:', error);
+      throw error;
+    }
+  }
+
+  // Get auto-recognition status
+  async getAutoRecognitionStatus() {
+    try {
+      const response = await this.fetchWithTimeout(
+        `${ESP32_CAM_BASE_URL}/auto-recognition`,
+        {
+          method: 'GET',
+        }
+      );
+      
+      const data = await response.json();
+      return data.autoRecognition || false;
+    } catch (error) {
+      console.error('[ESP32-CAM] Get auto-recognition status error:', error);
+      return false;
+    }
+  }
+
   // Test connection
   async testConnection() {
     try {
