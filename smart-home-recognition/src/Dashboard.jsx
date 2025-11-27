@@ -249,7 +249,7 @@ const Dashboard = () => {
           }));
           unlockDoor('Face Recognition', user.name);
         } else {
-          // Face not recognized
+          // Face not recognized - trigger alert ESP8266
           setSensorData(prev => ({
             ...prev,
             faceRecognition: {
@@ -258,6 +258,15 @@ const Dashboard = () => {
               confidence: 0
             }
           }));
+          
+          // Trigger alert di ESP8266
+          try {
+            await esp8266Service.triggerAlert();
+            console.log('[DASHBOARD] Alert triggered for unrecognized face');
+          } catch (err) {
+            console.error('Failed to trigger alert:', err);
+          }
+          
           triggerAlert('Wajah tidak dikenali');
         }
       }
@@ -313,14 +322,13 @@ const Dashboard = () => {
         
         return { success: true, message: response.message };
       } else {
-        // PIN salah - trigger buzzer
-        await esp8266Service.controlBuzzer(true);
-        await esp8266Service.updateLCD('Access DENIED', 'Invalid PIN');
-        
-        setTimeout(async () => {
-          await esp8266Service.controlBuzzer(false);
-          await esp8266Service.updateLCD('Door LOCKED', 'Waiting...');
-        }, 3000);
+        // PIN salah - trigger alert di ESP8266
+        try {
+          await esp8266Service.triggerAlert();
+          console.log('[DASHBOARD] Alert triggered for wrong PIN');
+        } catch (err) {
+          console.error('Failed to trigger alert:', err);
+        }
         
         return { success: false, message: 'Invalid PIN' };
       }
@@ -378,12 +386,11 @@ const Dashboard = () => {
     }
   };
 
-  // Fungsi untuk control lamp
-  const handleLampToggle = async (action) => {
+  // Fungsi untuk control lamp (always toggle)
+  const handleLampToggle = async () => {
     setLampLoading(true);
     try {
-      const state = action || 'toggle'; // 'on', 'off', or 'toggle'
-      const response = await esp8266Service.controlLamp(state);
+      const response = await esp8266Service.controlLamp('toggle');
       
       if (response && response.success) {
         setLampOn(response.lamp === 'on');
@@ -518,19 +525,27 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* ESP32 CAM Feed */}
-          <div className="lg:col-span-2">
+        {/* Main Layout with Flexbox */}
+        <div className="flex flex-col lg:flex-row gap-6">
+          {/* Left Column - Camera, Activity Monitor, Access Log */}
+          <div className="flex-1 lg:w-2/3 flex flex-col gap-6">
+            {/* ESP32 CAM Feed */}
             <CameraFeed 
               sensorData={sensorData} 
               doorStatus={doorStatus}
               onFaceRecognition={handleFaceRecognition}
               backendStatus={backendStatus}
             />
+            
+            {/* Activity Monitor Chart */}
+            <SecurityChart activityHistory={activityHistory} />
+            
+            {/* Access Log */}
+            <AccessLog accessLog={accessLog} />
           </div>
 
-          {/* Sensor & Actuator Status */}
-          <div className="space-y-6">
+          {/* Right Column - Controls */}
+          <div className="flex-1 lg:w-1/3 flex flex-col gap-6">
             <SensorStatus 
               sensorData={sensorData}
               onFingerprintScan={handleFingerprint}
@@ -553,12 +568,6 @@ const Dashboard = () => {
           <UserManagement 
             onRegisterClick={() => setShowRegisterModal(true)}
           />
-        </div>
-
-        {/* Access Log & Chart */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-          <AccessLog accessLog={accessLog} />
-          <SecurityChart activityHistory={activityHistory} />
         </div>
       </div>
       

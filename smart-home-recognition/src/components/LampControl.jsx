@@ -59,24 +59,6 @@ const LampControl = ({ lampOn, onToggle, loading }) => {
           <span className="text-gray-300 font-mono">GPIO1 (TX)</span>
         </div>
       </div>
-
-      {/* Quick Actions */}
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <button
-          onClick={() => onToggle('on')}
-          disabled={loading || lampOn}
-          className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          Force ON
-        </button>
-        <button
-          onClick={() => onToggle('off')}
-          disabled={loading || !lampOn}
-          className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          Force OFF
-        </button>
-      </div>
     </div>
   );
 };

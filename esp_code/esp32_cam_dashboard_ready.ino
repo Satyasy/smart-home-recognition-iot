@@ -87,10 +87,10 @@ void setup() {
   // Disable brownout detector
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   
-  // Initialize flash LED
-  pinMode(FLASH_LED_PIN, OUTPUT);
-  digitalWrite(FLASH_LED_PIN, LOW);
-  Serial.println("[OK] Flash LED initialized!");
+  // Flash LED disabled per user request
+  // pinMode(FLASH_LED_PIN, OUTPUT);
+  // digitalWrite(FLASH_LED_PIN, LOW);
+  Serial.println("[INFO] Flash LED disabled");
   
   // Initialize camera
   if (initCamera()) {
@@ -455,14 +455,7 @@ void handleCapture() {
   
   enableCORS();
   
-  // Turn on flash for capture
-  analogWrite(FLASH_LED_PIN, flashBrightness);
-  delay(100);
-  
   camera_fb_t* fb = esp_camera_fb_get();
-  
-  // Turn off flash
-  digitalWrite(FLASH_LED_PIN, LOW);
   
   if (!fb) {
     server.send(500, "application/json", "{\"success\":false,\"message\":\"Camera capture failed\"}");
@@ -551,14 +544,7 @@ void handleRecognizeFace() {
   
   Serial.println("[RECOGNIZE] Face recognition requested from dashboard");
   
-  // Turn on flash for capture
-  analogWrite(FLASH_LED_PIN, flashBrightness);
-  delay(100);
-  
   camera_fb_t* fb = esp_camera_fb_get();
-  
-  // Turn off flash
-  digitalWrite(FLASH_LED_PIN, LOW);
   
   if (!fb) {
     Serial.println("[ERROR] Camera capture failed");
@@ -568,15 +554,28 @@ void handleRecognizeFace() {
   
   Serial.printf("[RECOGNIZE] Image captured: %d bytes\n", fb->len);
   
+  // Convert to base64
+  String imageBase64 = base64::encode(fb->buf, fb->len);
+  Serial.printf("[RECOGNIZE] Base64 encoded: %d chars\n", imageBase64.length());
+  
   // Send to Flask for recognition
   if(WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     http.begin(flaskServerUrl);
-    http.addHeader("Content-Type", "image/jpeg");
-    http.setTimeout(15000); // 15 seconds
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(20000); // Increased to 20 seconds for upload
     
-    Serial.println("[RECOGNIZE] Sending to Flask backend...");
-    int httpResponseCode = http.POST(fb->buf, fb->len);
+    // Create JSON payload
+    DynamicJsonDocument jsonDoc(imageBase64.length() + 200);
+    jsonDoc["image"] = imageBase64;
+    String jsonPayload;
+    serializeJson(jsonDoc, jsonPayload);
+    
+    Serial.println("[RECOGNIZE] Uploading to Flask backend...");
+    unsigned long startTime = millis();
+    int httpResponseCode = http.POST(jsonPayload);
+    unsigned long uploadTime = millis() - startTime;
+    Serial.printf("[RECOGNIZE] Upload completed in %lu ms\n", uploadTime);
     
     esp_camera_fb_return(fb);
     
@@ -586,13 +585,20 @@ void handleRecognizeFace() {
       
       DynamicJsonDocument responseDoc(1024);
       if (deserializeJson(responseDoc, response) == DeserializationError::Ok) {
-        bool recognized = responseDoc["recognized"] | false;
-        String name = responseDoc["name"] | "Unknown";
-        float confidence = responseDoc["confidence"] | 0.0;
+        bool authorized = responseDoc["authorized"] | false;
+        String name = "Unknown";
+        float confidence = 0.0;
+        
+        if (responseDoc.containsKey("user")) {
+          name = responseDoc["user"]["name"] | "Unknown";
+          confidence = responseDoc["user"]["confidence"] | 0.0;
+        }
+        
+        bool recognized = authorized;
         
         if (recognized) {
-          Serial.printf("[SUCCESS] ✅ Face Recognized: %s (%.2f%%)\n", name.c_str(), confidence * 100);
-          lastRecognitionResult = name + " (" + String((int)(confidence * 100)) + "%)";
+          Serial.printf("[SUCCESS] ✅ Face Recognized: %s (%.2f%%)\n", name.c_str(), confidence);
+          lastRecognitionResult = name + " (" + String((int)confidence) + "%)";
           lastRecognitionTime = millis();
           
           // Send unlock command to ESP8266
@@ -645,59 +651,144 @@ void handleRecognizeFace() {
 void performAutoRecognition() {
   Serial.println("[AUTO] Starting auto face recognition...");
   
-  // Capture image with flash
-  analogWrite(FLASH_LED_PIN, flashBrightness);
-  delay(100);
-  
   camera_fb_t* fb = esp_camera_fb_get();
-  digitalWrite(FLASH_LED_PIN, LOW);
   
   if (!fb) {
-    Serial.println("[AUTO] Failed to capture image");
+    Serial.println("[AUTO] ❌ Failed to capture image");
     return;
   }
   
-  Serial.printf("[AUTO] Image captured: %d bytes\n", fb->len);
+  Serial.printf("[AUTO] ✓ Image captured: %d bytes\n", fb->len);
+  
+  // Convert to base64
+  String imageBase64 = base64::encode(fb->buf, fb->len);
+  Serial.printf("[AUTO] Base64 encoded: %d chars\n", imageBase64.length());
+  
+  Serial.println("[AUTO] Uploading to Flask backend...");
   
   // Send to Flask for recognition
   if(WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
     http.begin(flaskServerUrl);
-    http.addHeader("Content-Type", "image/jpeg");
-    http.setTimeout(10000); // 10 seconds
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(20000); // Increased to 20 seconds for upload
     
-    int httpResponseCode = http.POST(fb->buf, fb->len);
+    // Create JSON payload
+    DynamicJsonDocument jsonDoc(imageBase64.length() + 200);
+    jsonDoc["image"] = imageBase64;
+    String jsonPayload;
+    serializeJson(jsonDoc, jsonPayload);
+    
+    unsigned long startTime = millis();
+    int httpResponseCode = http.POST(jsonPayload);
+    unsigned long uploadTime = millis() - startTime;
+    
+    Serial.printf("[AUTO] Upload completed in %lu ms\n", uploadTime);
+    
     esp_camera_fb_return(fb);
     
     if (httpResponseCode > 0) {
       String response = http.getString();
+      Serial.printf("[AUTO] Response (%d): %s\n", httpResponseCode, response.c_str());
       
       DynamicJsonDocument responseDoc(1024);
       if (deserializeJson(responseDoc, response) == DeserializationError::Ok) {
-        bool recognized = responseDoc["recognized"] | false;
-        String name = responseDoc["name"] | "Unknown";
-        float confidence = responseDoc["confidence"] | 0.0;
+        bool authorized = responseDoc["authorized"] | false;
+        String name = "Unknown";
+        float confidence = 0.0;
+        
+        if (responseDoc.containsKey("user")) {
+          name = responseDoc["user"]["name"] | "Unknown";
+          confidence = responseDoc["user"]["confidence"] | 0.0;
+        }
+        
+        bool recognized = authorized;
         
         // Check if confidence meets threshold (50%)
-        if (recognized && confidence >= AUTO_RECOGNITION_THRESHOLD) {
-          Serial.printf("[AUTO] ✅ Face Recognized: %s (%.2f%%)\n", name.c_str(), confidence * 100);
-          lastRecognitionResult = name + " (" + String((int)(confidence * 100)) + "%)";
+        if (recognized && confidence >= (AUTO_RECOGNITION_THRESHOLD * 100)) {
+          Serial.println("\n========================================");
+          Serial.println("         🟢 ACCESS GRANTED");
+          Serial.println("========================================");
+          Serial.printf("👤 User: %s\n", name.c_str());
+          Serial.printf("📊 Confidence: %.2f%%\n", confidence);
+          Serial.println("🔓 Unlocking door...");
+          Serial.println("========================================\n");
+          
+          lastRecognitionResult = "GRANTED: " + name + " (" + String((int)confidence) + "%)";
           lastRecognitionTime = millis();
           
-          // Send unlock command
-          sendUnlockToESP8266(name, confidence);
-        } else if (recognized) {
-          Serial.printf("[AUTO] ⚠️ Face detected but confidence too low: %s (%.2f%% < 50%%)\n", name.c_str(), confidence * 100);
+          // Send unlock command to ESP8266
+          sendUnlockToESP8266(name, confidence / 100.0);
+          
+        } else if (recognized && confidence < (AUTO_RECOGNITION_THRESHOLD * 100)) {
+          Serial.println("\n========================================");
+          Serial.println("         🟡 ACCESS DENIED");
+          Serial.println("========================================");
+          Serial.printf("👤 Detected: %s\n", name.c_str());
+          Serial.printf("📊 Confidence: %.2f%% (< 50%% threshold)\n", confidence);
+          Serial.println("❌ Confidence too low");
+          Serial.println("========================================\n");
+          
+          lastRecognitionResult = "DENIED: Low confidence (" + String((int)confidence) + "%)";
+          
+          // Trigger alert on ESP8266
+          triggerAlertOnESP8266();
+          
         } else {
-          Serial.println("[AUTO] ❌ No face recognized");
+          Serial.println("\n========================================");
+          Serial.println("         🔴 ACCESS DENIED");
+          Serial.println("========================================");
+          Serial.println("❌ Face not recognized");
+          Serial.println("⚠️ No match found in database");
+          Serial.println("========================================\n");
+          
+          lastRecognitionResult = "DENIED: Unknown face";
+          
+          // Trigger alert on ESP8266
+          triggerAlertOnESP8266();
         }
+      } else {
+        Serial.println("[AUTO] ❌ Failed to parse JSON response");
       }
     } else {
-      Serial.printf("[AUTO] Flask HTTP error: %d\n", httpResponseCode);
+      Serial.printf("[AUTO] ❌ HTTP error: %d\n", httpResponseCode);
+      if (httpResponseCode == -1) {
+        Serial.println("[AUTO] Connection timeout - Check Flask server");
+      }
     }
     
     http.end();
   }
+}
+
+// ===== Trigger Alert on ESP8266 (for denied access) =====
+void triggerAlertOnESP8266() {
+  if(WiFi.status() != WL_CONNECTED) {
+    Serial.println("[ESP8266] WiFi not connected, cannot trigger alert");
+    return;
+  }
+  
+  HTTPClient http;
+  String url = String(esp8266Ip) + "/alert";
+  
+  http.begin(url);
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(5000);
+  
+  DynamicJsonDocument doc(128);
+  String jsonPayload;
+  serializeJson(doc, jsonPayload);
+  
+  Serial.println("[ESP8266] 🚨 Triggering alert...");
+  int httpCode = http.POST(jsonPayload);
+  
+  if (httpCode > 0) {
+    Serial.printf("[ESP8266] ✅ Alert triggered (HTTP %d)\n", httpCode);
+  } else {
+    Serial.printf("[ESP8266] ❌ Failed to trigger alert: %d\n", httpCode);
+  }
+  
+  http.end();
 }
 
 // ===== Send Unlock Command to ESP8266 =====

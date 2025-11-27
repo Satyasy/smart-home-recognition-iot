@@ -146,6 +146,20 @@ class ESP8266Service {
       throw error;
     }
   }
+
+  // Trigger Alert (buzzer + LED flash)
+  async triggerAlert() {
+    try {
+      const data = await this.fetchWithTimeout(`${ESP8266_BASE_URL}/alert`, {
+        method: 'POST',
+        body: JSON.stringify({})
+      });
+      return data;
+    } catch (error) {
+      console.error('Failed to trigger alert:', error);
+      throw error;
+    }
+  }
 }
 
 const esp8266Service = new ESP8266Service();
