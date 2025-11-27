@@ -280,7 +280,43 @@
       StaticJsonDocument<256> doc;
       DeserializationError error = deserializeJson(doc, body);
       
-      if (!error && doc.containsKey("pin")) {
+      if (error) {
+        enableCORS();
+        server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+        return;
+      }
+      
+      // Handle Face Recognition unlock
+      if (doc.containsKey("method") && doc["method"] == "face") {
+        String userName = doc["name"] | "Unknown";
+        float confidence = doc["confidence"] | 0.0;
+        
+        Serial.print("[HTTP] POST /unlock - FACE RECOGNITION: ");
+        Serial.print(userName);
+        Serial.print(" (");
+        Serial.print(confidence * 100);
+        Serial.println("%)");
+        
+        unlockDoor();
+        
+        StaticJsonDocument<256> response;
+        response["success"] = true;
+        response["message"] = "Door unlocked by face recognition";
+        response["user"] = userName;
+        response["confidence"] = confidence;
+        response["servo"]["angle"] = 180;
+        response["servo"]["locked"] = false;
+        
+        String json;
+        serializeJson(response, json);
+        
+        enableCORS();
+        server.send(200, "application/json", json);
+        return;
+      }
+      
+      // Handle PIN unlock
+      if (doc.containsKey("pin")) {
         String receivedPin = doc["pin"].as<String>();
         
         Serial.print("[HTTP] POST /unlock - PIN: ");
@@ -326,7 +362,7 @@
     }
     
     enableCORS();
-    server.send(400, "application/json", "{\"error\":\"Invalid request\"}");
+    server.send(400, "application/json", "{\"error\":\"Invalid request - missing method or pin\"}");
   }
 
   // POST /lock
