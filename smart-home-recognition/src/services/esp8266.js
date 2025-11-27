@@ -132,6 +132,20 @@ class ESP8266Service {
       throw error;
     }
   }
+
+  // Control Lamp (Relay)
+  async controlLamp(state) {
+    try {
+      const data = await this.fetchWithTimeout(`${ESP8266_BASE_URL}/lamp`, {
+        method: 'POST',
+        body: JSON.stringify({ state: state }) // 'on', 'off', or 'toggle'
+      });
+      return data;
+    } catch (error) {
+      console.error('Failed to control lamp:', error);
+      throw error;
+    }
+  }
 }
 
 const esp8266Service = new ESP8266Service();

@@ -6,8 +6,12 @@ import ActuatorControl from './components/ActuatorControl';
 import AccessLog from './components/AccessLog';
 import SecurityChart from './components/SecurityChart';
 import PinModal from './components/PinModal';
+import LampControl from './components/LampControl';
+import UserManagement from './components/UserManagement';
+import RegisterUser from './components/RegisterUser';
 import ApiService from './services/api';
 import esp8266Service from './services/esp8266';
+import esp32CamService from './services/esp32cam';
 import { testESP8266Connection, mockESP8266Data } from './utils/esp8266Test';
 
 const Dashboard = () => {
@@ -29,8 +33,12 @@ const Dashboard = () => {
   const [activityHistory, setActivityHistory] = useState([]);
   const [backendStatus, setBackendStatus] = useState('connecting');
   const [esp8266Status, setEsp8266Status] = useState('connecting');
+  const [esp32CamStatus, setEsp32CamStatus] = useState('connecting');
   const [showPinModal, setShowPinModal] = useState(false);
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [testMode, setTestMode] = useState(false);
+  const [lampOn, setLampOn] = useState(false);
+  const [lampLoading, setLampLoading] = useState(false);
 
   // Load data saat component mount
   useEffect(() => {
@@ -53,10 +61,16 @@ const Dashboard = () => {
       loadESP8266Data();
     }, 2000);
 
+    // Check ESP32-CAM status setiap 3 detik
+    const esp32CamInterval = setInterval(() => {
+      checkESP32CamStatus();
+    }, 3000);
+
     return () => {
       clearInterval(logsInterval);
       clearInterval(healthInterval);
       clearInterval(esp8266Interval);
+      clearInterval(esp32CamInterval);
     };
   }, []);
 
@@ -70,6 +84,22 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Backend health check failed:', error);
       setBackendStatus('offline');
+    }
+  };
+
+  // Check ESP32-CAM status
+  const checkESP32CamStatus = async () => {
+    try {
+      const status = await esp32CamService.getStatus();
+      if (status && status.status === 'online') {
+        setEsp32CamStatus('online');
+        console.log('📷 ESP32-CAM online:', status.ip);
+      } else {
+        setEsp32CamStatus('offline');
+      }
+    } catch (error) {
+      console.error('ESP32-CAM status check failed:', error);
+      setEsp32CamStatus('offline');
     }
   };
 
@@ -121,6 +151,9 @@ const Dashboard = () => {
             angle: statusResponse.servo?.angle || 0,
             locked: statusResponse.servo?.locked !== false
           },
+          relay: {
+            lamp: statusResponse.relay?.lamp || false
+          },
           led: {
             red: statusResponse.led?.red !== false,
             green: statusResponse.led?.green === true
@@ -135,6 +168,9 @@ const Dashboard = () => {
         
         // Update door status
         setDoorStatus(statusResponse.servo?.locked !== false ? 'locked' : 'unlocked');
+        
+        // Update lamp status
+        setLampOn(statusResponse.relay?.lamp === true);
       }
     } catch (error) {
       console.error('ESP8266 Connection Error:', error);
@@ -342,6 +378,37 @@ const Dashboard = () => {
     }
   };
 
+  // Fungsi untuk control lamp
+  const handleLampToggle = async (action) => {
+    setLampLoading(true);
+    try {
+      const state = action || 'toggle'; // 'on', 'off', or 'toggle'
+      const response = await esp8266Service.controlLamp(state);
+      
+      if (response && response.success) {
+        setLampOn(response.lamp === 'on');
+        console.log('💡 Lamp:', response.lamp);
+        
+        // Log activity
+        const now = new Date();
+        const newLog = {
+          time: now.toLocaleTimeString('id-ID'),
+          date: now.toLocaleDateString('id-ID'),
+          method: 'Lamp Control',
+          user: 'Manual',
+          status: 'success',
+          type: 'lamp',
+          detail: response.lamp === 'on' ? 'Lamp turned ON' : 'Lamp turned OFF'
+        };
+        setAccessLog(prev => [newLog, ...prev].slice(0, 10));
+      }
+    } catch (error) {
+      console.error('Lamp control error:', error);
+    } finally {
+      setLampLoading(false);
+    }
+  };
+
   // Fungsi untuk trigger alert (buzzer)
   const triggerAlert = (reason) => {
     setSensorData(prev => ({
@@ -400,6 +467,16 @@ const Dashboard = () => {
                     <span className="text-xs text-gray-500">
                       ESP8266: {esp8266Status === 'online' ? 'Connected' : 
                                 esp8266Status === 'offline' ? 'Disconnected' : 'Connecting...'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      esp32CamStatus === 'online' ? 'bg-green-400 animate-pulse' : 
+                      esp32CamStatus === 'offline' ? 'bg-red-400' : 'bg-yellow-400'
+                    }`} />
+                    <span className="text-xs text-gray-500">
+                      ESP32-CAM: {esp32CamStatus === 'online' ? 'Connected' : 
+                                  esp32CamStatus === 'offline' ? 'Disconnected' : 'Connecting...'}
                     </span>
                   </div>
                   <button
@@ -463,7 +540,19 @@ const Dashboard = () => {
               onUnlock={() => setShowPinModal(true)}
               onLock={lockDoor}
             />
+            <LampControl 
+              lampOn={lampOn}
+              onToggle={handleLampToggle}
+              loading={lampLoading}
+            />
           </div>
+        </div>
+
+        {/* User Management */}
+        <div className="mt-6">
+          <UserManagement 
+            onRegisterClick={() => setShowRegisterModal(true)}
+          />
         </div>
 
         {/* Access Log & Chart */}
@@ -483,6 +572,17 @@ const Dashboard = () => {
               setShowPinModal(false);
             }
             return result;
+          }}
+        />
+      )}
+
+      {/* Register User Modal */}
+      {showRegisterModal && (
+        <RegisterUser
+          onClose={() => setShowRegisterModal(false)}
+          onSuccess={(result) => {
+            console.log('[DASHBOARD] User registered:', result);
+            // Reload akan terjadi otomatis di UserManagement
           }}
         />
       )}

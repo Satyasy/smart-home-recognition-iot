@@ -1,24 +1,3 @@
-/*
- * ESP8266 Smart Door Lock - Full Implementation
- * 
- * Hardware yang digunakan:
- * - ESP8266 NodeMCU
- * - DHT11 (Temperature & Humidity)
- * - LDR (Light sensor)
- * - HC-SR04 (Ultrasonic sensor)
- * - Servo SG90 (Door lock)
- * - LED Red & Green
- * - Buzzer
- * - LCD I2C 16x2
- * 
- * Features:
- * - Real sensor data
- * - PIN verification untuk unlock door
- * - Auto-lock setelah 5 detik
- * - LCD display untuk status
- * - LED indicator (Red=Locked, Green=Unlocked)
- * - Buzzer untuk alert
- */
 
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
@@ -29,30 +8,37 @@
 #include <LiquidCrystal_I2C.h>
 
 // ===== WiFi Configuration =====
-const char* ssid = "YOUR_WIFI_SSID";        
-const char* password = "YOUR_WIFI_PASSWORD"; 
+const char* ssid = "Zfox";        
+const char* password = "asdfg1234"; 
 
 // ===== Static IP Configuration =====
 IPAddress local_IP(192, 168, 5, 250);
 IPAddress gateway(192, 168, 5, 1);
 IPAddress subnet(255, 255, 255, 0);
 
-// ===== Pin Configuration =====
-#define DHT_PIN D4        // DHT11 data pin
+// ===== Pin Configuration (Updated sesuai wiring) =====
+#define DHT_PIN D7        // GPIO13 - DHT11 data pin
 #define DHT_TYPE DHT11
-#define LDR_PIN A0        // LDR analog pin
-#define TRIG_PIN D5       // HC-SR04 trigger
-#define ECHO_PIN D6       // HC-SR04 echo
-#define SERVO_PIN D7      // Servo signal
-#define LED_RED_PIN D1    // Red LED
-#define LED_GREEN_PIN D2  // Green LED
-#define BUZZER_PIN D3     // Buzzer
+#define LDR_PIN A0        // ADC - LDR analog pin
+#define TRIG_PIN D5       // GPIO14 - HC-SR04 trigger
+#define ECHO_PIN D6       // GPIO12 - HC-SR04 echo
+#define SERVO_PIN D3      // GPIO0 - Servo signal
+#define BUZZER_PIN D4     // GPIO2 - Buzzer
+#define LED_RED_PIN D0        // GPIO16 - LED (single LED)
+#define LED_GREEN_PIN D8
+#define RELAY_PIN 1       // GPIO1 (TX) - Relay for lamp
+// Note: GPIO1 (TX) can be used as GPIO after Serial is disabled
+// LCD I2C: SDA=D1 (GPIO5), SCL=D2 (GPIO4)
 
 // ===== Objects =====
 ESP8266WebServer server(80);
 DHT dht(DHT_PIN, DHT_TYPE);
 Servo doorServo;
 LiquidCrystal_I2C lcd(0x27, 16, 2); // I2C address 0x27, 16 columns, 2 rows
+                                     // SDA=D1 (GPIO5), SCL=D2 (GPIO4)
+
+// ===== Relay State =====
+bool lampOn = false;
 
 // ===== PIN Configuration =====
 const String DEFAULT_PIN = "0000";
@@ -124,10 +110,10 @@ void updateSensorData() {
 // ===== Actuator Functions =====
 void unlockDoor() {
   doorLocked = false;
-  doorServo.write(90); // Unlock position
+  doorServo.write(180); // Unlock position
   
-  digitalWrite(LED_RED_PIN, LOW);
-  digitalWrite(LED_GREEN_PIN, HIGH);
+  digitalWrite(LED_RED_PIN, LOW);   // RED LED OFF
+  digitalWrite(LED_GREEN_PIN, HIGH); // GREEN LED ON (unlocked)
   
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -153,8 +139,8 @@ void lockDoor() {
   doorLocked = true;
   doorServo.write(0); // Lock position
   
-  digitalWrite(LED_RED_PIN, HIGH);
-  digitalWrite(LED_GREEN_PIN, LOW);
+  digitalWrite(LED_RED_PIN, HIGH);  // RED LED ON (locked)
+  digitalWrite(LED_GREEN_PIN, LOW);  // GREEN LED OFF
   
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -170,9 +156,30 @@ void lockDoor() {
   Serial.println("[DOOR] LOCKED");
 }
 
+// ===== Relay/Lamp Control =====
+void turnLampOn() {
+  lampOn = true;
+  digitalWrite(RELAY_PIN, HIGH); // Relay ON (lamp on)
+  Serial.println("[LAMP] ON");
+}
+
+void turnLampOff() {
+  lampOn = false;
+  digitalWrite(RELAY_PIN, LOW); // Relay OFF (lamp off)
+  Serial.println("[LAMP] OFF");
+}
+
+void toggleLamp() {
+  if (lampOn) {
+    turnLampOff();
+  } else {
+    turnLampOn();
+  }
+}
+
 void triggerAlert() {
-  digitalWrite(LED_RED_PIN, HIGH);
-  digitalWrite(LED_GREEN_PIN, LOW);
+  digitalWrite(LED_RED_PIN, HIGH);   // RED LED ON for alert
+  digitalWrite(LED_GREEN_PIN, LOW);  // GREEN LED OFF
   
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -180,15 +187,15 @@ void triggerAlert() {
   lcd.setCursor(0, 1);
   lcd.print("Access Denied");
   
-  // Buzzer alert pattern
-  for (int i = 0; i < 3; i++) {
+  // Buzzer alert pattern - SHORTENED to avoid blocking
+  for (int i = 0; i < 2; i++) {  // Changed from 3 to 2 beeps
     digitalWrite(BUZZER_PIN, HIGH);
-    delay(200);
+    delay(150);  // Reduced from 200ms
     digitalWrite(BUZZER_PIN, LOW);
-    delay(100);
+    delay(80);   // Reduced from 100ms
   }
   
-  delay(2000);
+  delay(1000);  // Reduced from 2000ms (2 seconds to 1 second)
   
   if (doorLocked) {
     lcd.clear();
@@ -234,6 +241,8 @@ void handleStatus() {
   
   doc["buzzer"]["active"] = false; // Buzzer is momentary
   
+  doc["relay"]["lamp"] = lampOn; // Lamp status
+  
   // Get current LCD text (simplified)
   doc["lcd"]["line1"] = doorLocked ? "Door LOCKED" : "Door UNLOCKED";
   doc["lcd"]["line2"] = doorLocked ? "Scan to enter" : "Welcome!";
@@ -267,7 +276,7 @@ void handleUnlock() {
         StaticJsonDocument<256> response;
         response["success"] = true;
         response["message"] = "Door unlocked";
-        response["servo"]["angle"] = 90;
+        response["servo"]["angle"] = 180;
         response["servo"]["locked"] = false;
         
         String json;
@@ -277,9 +286,7 @@ void handleUnlock() {
         server.send(200, "application/json", json);
         return;
       } else {
-        // Wrong PIN
-        triggerAlert();
-        
+        // Wrong PIN - Send response IMMEDIATELY before triggering alert
         StaticJsonDocument<256> response;
         response["success"] = false;
         response["message"] = "Invalid PIN";
@@ -291,6 +298,11 @@ void handleUnlock() {
         server.send(403, "application/json", json);
         
         Serial.println("[HTTP] POST /unlock - WRONG PIN");
+        
+        // IMPORTANT: Trigger alert AFTER sending response to avoid timeout
+        delay(10); // Small delay to ensure response is sent
+        triggerAlert();
+        
         return;
       }
     }
@@ -380,6 +392,44 @@ void handleBuzzer() {
       server.send(200, "application/json", json);
       
       Serial.println("[HTTP] POST /buzzer");
+      return;
+    }
+  }
+  
+  enableCORS();
+  server.send(400, "application/json", "{\"error\":\"Invalid request\"}");
+}
+
+// POST /lamp - Control relay lamp
+void handleLamp() {
+  if (server.hasArg("plain")) {
+    String body = server.arg("plain");
+    StaticJsonDocument<256> doc;
+    DeserializationError error = deserializeJson(doc, body);
+    
+    if (!error && doc.containsKey("state")) {
+      String state = doc["state"].as<String>();
+      
+      if (state == "on") {
+        turnLampOn();
+      } else if (state == "off") {
+        turnLampOff();
+      } else if (state == "toggle") {
+        toggleLamp();
+      }
+      
+      StaticJsonDocument<256> response;
+      response["success"] = true;
+      response["lamp"] = lampOn ? "on" : "off";
+      response["message"] = lampOn ? "Lamp turned ON" : "Lamp turned OFF";
+      
+      String json;
+      serializeJson(response, json);
+      
+      enableCORS();
+      server.send(200, "application/json", json);
+      
+      Serial.println("[HTTP] POST /lamp - " + String(lampOn ? "ON" : "OFF"));
       return;
     }
   }
@@ -561,17 +611,25 @@ void setup() {
   Serial.println("ESP8266 Smart Door Lock");
   Serial.println("=================================");
   
+  // Disable Serial for GPIO1 (TX) to use as relay pin
+  Serial.begin(115200);
+  delay(100);
+  Serial.flush();
+  // Serial.end(); // Keep serial for debugging, but relay on GPIO1 may conflict
+  
   // Initialize pins
-  pinMode(LED_RED_PIN, OUTPUT);
-  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_RED_PIN, OUTPUT);    // RED LED
+  pinMode(LED_GREEN_PIN, OUTPUT);  // GREEN LED
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
+  pinMode(RELAY_PIN, OUTPUT);      // Relay for lamp
   
-  // Initial state - door locked
-  digitalWrite(LED_RED_PIN, HIGH);
-  digitalWrite(LED_GREEN_PIN, LOW);
+  // Initial state - door locked, lamp off
+  digitalWrite(LED_RED_PIN, HIGH);   // RED LED ON (locked)
+  digitalWrite(LED_GREEN_PIN, LOW);  // GREEN LED OFF
   digitalWrite(BUZZER_PIN, LOW);
+  digitalWrite(RELAY_PIN, LOW);      // Lamp OFF
   
   // Initialize DHT
   dht.begin();
@@ -643,6 +701,7 @@ void setup() {
   server.on("/lock", HTTP_POST, handleLock);
   server.on("/led", HTTP_POST, handleLED);
   server.on("/buzzer", HTTP_POST, handleBuzzer);
+  server.on("/lamp", HTTP_POST, handleLamp);     // NEW: Lamp control
   server.on("/lcd", HTTP_POST, handleLCD);
   
   // Handle OPTIONS for CORS
@@ -652,6 +711,7 @@ void setup() {
   server.on("/lock", HTTP_OPTIONS, handleOptions);
   server.on("/led", HTTP_OPTIONS, handleOptions);
   server.on("/buzzer", HTTP_OPTIONS, handleOptions);
+  server.on("/lamp", HTTP_OPTIONS, handleOptions); // NEW: CORS for lamp
   server.on("/lcd", HTTP_OPTIONS, handleOptions);
   
   // Start server

@@ -205,35 +205,52 @@ def register_face():
 def recognize_face():
     """
     Recognize wajah dari ESP32-CAM
-    Body: {
-        "image": "base64_encoded_image"
-    }
+    Accepts:
+    - Content-Type: application/json with {"image": "base64_string"}
+    - Content-Type: image/jpeg (raw JPEG data dari ESP32-CAM)
+    
     Response: {
         "success": true/false,
-        "authorized": true/false,
-        "user": {...},
+        "recognized": true/false,
+        "name": "...",
+        "confidence": 0.85,
         "message": "..."
     }
     """
     temp_image_path = None
     try:
-        data = request.json
-        
-        if not data or 'image' not in data:
-            return jsonify({
-                'success': False,
-                'authorized': False,
-                'message': 'No image provided'
-            }), 400
-        
-        # Decode image
-        image = decode_image(data['image'])
-        if image is None:
-            return jsonify({
-                'success': False,
-                'authorized': False,
-                'message': 'Invalid image format'
-            }), 400
+        # Check if raw JPEG image (dari ESP32-CAM)
+        if request.content_type and 'image/jpeg' in request.content_type:
+            # Raw JPEG data
+            jpeg_data = request.data
+            nparr = np.frombuffer(jpeg_data, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if image is None:
+                return jsonify({
+                    'success': False,
+                    'recognized': False,
+                    'message': 'Invalid JPEG image'
+                }), 400
+        else:
+            # JSON dengan base64
+            data = request.json
+            
+            if not data or 'image' not in data:
+                return jsonify({
+                    'success': False,
+                    'recognized': False,
+                    'message': 'No image provided'
+                }), 400
+            
+            # Decode image
+            image = decode_image(data['image'])
+            if image is None:
+                return jsonify({
+                    'success': False,
+                    'recognized': False,
+                    'message': 'Invalid image format'
+                }), 400
         
         # Save to temporary file
         temp_image_path = save_temp_image(image, "recognize")
@@ -300,13 +317,17 @@ def recognize_face():
         if best_match:
             return jsonify({
                 'success': True,
+                'recognized': True,
                 'authorized': True,
+                'name': best_match['name'],
+                'confidence': best_match['confidence'] / 100,  # Return as 0.0-1.0 untuk ESP32-CAM
                 'user': best_match,
                 'message': f'Welcome {best_match["name"]}!'
             }), 200
         else:
             return jsonify({
                 'success': True,
+                'recognized': False,
                 'authorized': False,
                 'message': 'Face not recognized or confidence too low'
             }), 200

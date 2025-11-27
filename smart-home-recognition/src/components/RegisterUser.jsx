@@ -4,9 +4,7 @@ import ApiService from '../services/api';
 
 const RegisterUser = ({ onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: ''
+    name: ''
   });
   const [imageBase64, setImageBase64] = useState('');
   const [preview, setPreview] = useState('');
@@ -39,8 +37,8 @@ const RegisterUser = ({ onClose, onSuccess }) => {
       const response = await ApiService.registerUser(
         imageBase64,
         formData.name,
-        formData.email,
-        formData.phone
+        '', // email (optional)
+        ''  // phone (optional)
       );
 
       if (response.success) {
@@ -120,34 +118,8 @@ const RegisterUser = ({ onClose, onSuccess }) => {
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               className="w-full bg-gray-700 text-white px-4 py-2 rounded-lg border border-gray-600 focus:border-blue-400 focus:outline-none"
+              placeholder="Enter full name"
               required
-            />
-          </div>
-
-          {/* Email */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Email *
-            </label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full bg-gray-700 text-white px-4 py-2 rounded-lg border border-gray-600 focus:border-blue-400 focus:outline-none"
-              required
-            />
-          </div>
-
-          {/* Phone */}
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Phone (Optional)
-            </label>
-            <input
-              type="tel"
-              value={formData.phone}
-              onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-              className="w-full bg-gray-700 text-white px-4 py-2 rounded-lg border border-gray-600 focus:border-blue-400 focus:outline-none"
             />
           </div>
 

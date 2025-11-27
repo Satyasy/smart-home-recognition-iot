@@ -11,7 +11,7 @@ const CameraFeed = ({ sensorData, doorStatus, onFaceRecognition, backendStatus }
   useEffect(() => {
     // Get ESP32-CAM URL from environment or use default
     const camIp = process.env.REACT_APP_ESP32_CAM_IP || '192.168.5.86';
-    const streamUrl = `http://${camIp}:81/stream`;  // Port 81 untuk stream
+    const streamUrl = `http://${camIp}/stream`;  // Stream endpoint (same port as API)
     setEsp32CamUrl(streamUrl);
     console.log('📷 ESP32-CAM Stream URL:', streamUrl);
   }, []);
@@ -27,7 +27,7 @@ const CameraFeed = ({ sensorData, doorStatus, onFaceRecognition, backendStatus }
   const refreshCamera = () => {
     setCameraStream('connecting');
     const camIp = process.env.REACT_APP_ESP32_CAM_IP || '192.168.5.86';
-    const streamUrl = `http://${camIp}:81/stream?t=${Date.now()}`;
+    const streamUrl = `http://${camIp}/stream?t=${Date.now()}`;
     setEsp32CamUrl(streamUrl);
     
     console.log('🔄 Refreshing camera stream:', streamUrl);
